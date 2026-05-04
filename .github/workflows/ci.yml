@@ -18,8 +18,13 @@ jobs:
       fail-fast: false
     env:
       owrt-package: blue-merle
-      SDK_URL: "https://downloads.openwrt.org/releases/23.05.0/targets/ath79/nand/openwrt-sdk-23.05.0-ath79-nand_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
-      SDK_FILENAME: "openwrt-sdk-23.05.0-ath79-nand_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+      # blue-merle 3.x targets the GL.iNet Mudi 7 (GL-E5800), which runs a
+      # Qualcomm aarch64 SoC. The package contains only shell + Python +
+      # static resources (no native compilation), so any aarch64 SDK builds
+      # an installable .ipk.
+      SDK_URL: "https://downloads.openwrt.org/releases/23.05.0/targets/qualcommax/ipq807x/openwrt-sdk-23.05.0-qualcommax-ipq807x_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+      SDK_FILENAME: "openwrt-sdk-23.05.0-qualcommax-ipq807x_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+      PKG_ARCH: "aarch64_cortex-a53"
     steps:
       - uses: actions/checkout@v3
         with:
@@ -56,7 +61,7 @@ jobs:
       - name: Prepare artifact
         run: |
           mkdir package-output
-          rsync -av sdk/"${SDK_FILENAME%.tar.xz}"/bin/packages/mips_24kc/base/"${{ env.owrt-package }}"*.ipk package-output/
+          rsync -av sdk/"${SDK_FILENAME%.tar.xz}"/bin/packages/${{ env.PKG_ARCH }}/base/"${{ env.owrt-package }}"*.ipk package-output/
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.generate-name.outputs.artifact-name }}

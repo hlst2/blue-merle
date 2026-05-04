@@ -2,48 +2,82 @@
 
 . /lib/blue-merle/functions.sh
 
+# Optional second argument is the SIM slot (1 or 2). If omitted, we
+# operate on whichever slot is currently active.
+slot="$2"
 
 show_message() {
-    # There is mcu_send_message() in /lib/functions/gl_util.sh but we don't want to load the file, thinking that it will take too long
+    # mcu_send_message() lives in /lib/functions/gl_util.sh but loading
+    # that file is slow, so we write the JSON directly.
     echo {\"msg\": \"$1\"} > /dev/ttyS0
 }
 
 
-logger -p notice -t blue-merle-libexec  "Libexec $1"
+logger -p notice -t blue-merle-libexec  "Libexec $1 slot=${slot:-current}"
 
-if [ "$1" == "read-imei" ]; then
-    imei="$(READ_IMEI)"
-    echo -n  $imei
-    show_message "My IMEI: $imei"
+case "$1" in
+    read-imei)
+        imei="$(READ_IMEI "$slot")"
+        echo -n "$imei"
+        show_message "My IMEI: $imei"
+        ;;
 
-elif [ "$1" == "read-imsi" ]; then
-    imsi="$(READ_IMSI)"
-    if [ "x$imsi" == "x" ]; then
-        echo "No IMSI found $imsi" >&2
-        exit 1
-    else
-        echo -n  $imsi
+    read-imsi)
+        imsi="$(READ_IMSI "$slot")"
+        if [ "x$imsi" = "x" ]; then
+            echo "No IMSI found $imsi" >&2
+            exit 1
+        fi
+        echo -n "$imsi"
         show_message "My IMSI: $imsi"
-    fi
+        ;;
 
-elif [ "$1" == "random-imei" ]; then
-    flock -n /tmp/blue-merle-imei-generate.lock  timeout 15  /lib/blue-merle/imei_generate.py --random
-    READ_IMEI
+    read-slot)
+        echo -n "$(READ_SIM_SLOT)"
+        ;;
 
-elif [ "$1" == "shutdown-modem" ]; then
-    exec gl_modem AT AT+CFUN=4
+    set-slot)
+        SET_SIM_SLOT "$slot"
+        ;;
 
-elif [ "$1" == "shutdown" ]; then
-    show_message "Shutting down..."
-    echo -n "Shutting down"
-    logger -p notice -t blue-merle-libexec "Shutting down"
-    echo '{ "poweroff": "1" }' > /dev/ttyS0
+    random-imei)
+        if [ -n "$slot" ]; then
+            flock -n /tmp/blue-merle-imei-generate.lock timeout 15 \
+                /lib/blue-merle/imei_generate.py --random --slot "$slot"
+        else
+            flock -n /tmp/blue-merle-imei-generate.lock timeout 15 \
+                /lib/blue-merle/imei_generate.py --random
+        fi
+        READ_IMEI "$slot"
+        ;;
 
-elif [ "$1" == "write-imei" ]; then
-    new_imei=$2
-    echo -n  { "action": "write" }
-else
-    echo -n   '{"msg":"Hello, World!"}'
-    #echo 'foo'>&2
-    echo 0
-fi
+    shutdown-modem)
+        if [ -n "$slot" ]; then
+            exec gl_modem -s "$slot" AT AT+CFUN=4
+        else
+            exec gl_modem AT AT+CFUN=4
+        fi
+        ;;
+
+    shutdown)
+        show_message "Shutting down..."
+        echo -n "Shutting down"
+        logger -p notice -t blue-merle-libexec "Shutting down"
+        echo '{ "poweroff": "1" }' > /dev/ttyS0
+        ;;
+
+    write-imei)
+        new_imei="$2"
+        target_slot="$3"
+        if [ -n "$target_slot" ]; then
+            python3 /lib/blue-merle/imei_generate.py -s "$new_imei" --slot "$target_slot"
+        else
+            python3 /lib/blue-merle/imei_generate.py -s "$new_imei"
+        fi
+        ;;
+
+    *)
+        echo -n '{"msg":"Hello, World!"}'
+        echo 0
+        ;;
+esac

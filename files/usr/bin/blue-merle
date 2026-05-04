@@ -2,13 +2,36 @@
 
 . /lib/blue-merle/functions.sh
 
-if [ ! -c "/dev/ttyUSB3" ]; then
-	echo "Error: /dev/ttyUSB3 does not exist."
-	echo "Please reboot and contact the maintainer if the problem persists."
-	exit 1;
+if ! command -v gl_modem >/dev/null 2>&1; then
+	echo "Error: the gl_modem helper is not available."
+	echo "blue-merle requires GL.iNet's gl-sdk4 firmware (Mudi 7 / GL-E5800)."
+	exit 1
 fi
 
-echo -n "Swap SIM card and update IMEI? (Y/n): "
+if ! gl_modem AT AT | grep -q OK; then
+	echo "Error: the modem is not responding to AT commands."
+	echo "Please reboot and contact the maintainer if the problem persists."
+	exit 1
+fi
+
+# Mudi 7 has two SIM slots. Default to the active one but let the user pick.
+current_slot=$(READ_SIM_SLOT)
+echo "Currently active SIM slot: $current_slot"
+echo -n "Operate on slot 1, slot 2, or current ($current_slot)? [1/2/c, default c]: "
+read slot_choice
+case "$slot_choice" in
+	1) slot=1 ;;
+	2) slot=2 ;;
+	*) slot=$current_slot ;;
+esac
+
+if [ "$slot" != "$current_slot" ]; then
+	echo "Switching to SIM slot $slot..."
+	SET_SIM_SLOT "$slot"
+	sleep 3
+fi
+
+echo -n "Swap SIM card in slot $slot and update IMEI? (Y/n): "
 read answer
 case $answer in
 	n*) answer=0;;
@@ -22,8 +45,8 @@ fi
 
 echo "Disabling the ME from both transmitting and receiving RF signals..."
 
-old_imei=$(READ_IMEI)
-old_imsi=$(READ_IMSI)
+old_imei=$(READ_IMEI "$slot")
+old_imsi=$(READ_IMSI "$slot")
 
 answer=1
 while [[ "$answer" -eq 1 ]]; do
@@ -49,10 +72,10 @@ done
 ## the SIM card has been replaced. We intend to prevent an accidential
 ## leak of the new SIM's IMSI with the old IMEI just in case the modem
 ## accidentally tried to log in to the network.
-python3 /lib/blue-merle/imei_generate.py -r
+python3 /lib/blue-merle/imei_generate.py -r --slot "$slot"
 
 
-echo -n "Please now replace the SIM card and press any key to continue. "
+echo -n "Please now replace the SIM card in slot $slot and press any key to continue. "
 read answer
 
 leak=0
@@ -77,7 +100,7 @@ fi
 
 sleep 1
 
-new_imsi=$(READ_IMSI)
+new_imsi=$(READ_IMSI "$slot")
 
 if [[ "$old_imsi" == "$new_imsi" ]]; then
 	echo
@@ -85,20 +108,20 @@ if [[ "$old_imsi" == "$new_imsi" ]]; then
 	echo
 fi
 
-echo -n "Would you like to set a random (r) or deterministic (d) IMEI? (R/d): " 
-read answer                                      
-case $answer in                                  
+echo -n "Would you like to set a random (r) or deterministic (d) IMEI? (R/d): "
+read answer
+case $answer in
         d*) answer=0;;
         D*) answer=0;;
         *) answer=1;;
-esac                                            
-if [[ "$answer" -eq 1 ]]; then                  
-	python3 /lib/blue-merle/imei_generate.py -r
+esac
+if [[ "$answer" -eq 1 ]]; then
+	python3 /lib/blue-merle/imei_generate.py -r --slot "$slot"
 else
-	python3 /lib/blue-merle/imei_generate.py -d
-fi   
+	python3 /lib/blue-merle/imei_generate.py -d --slot "$slot"
+fi
 
-new_imei=$(READ_IMEI)
+new_imei=$(READ_IMEI "$slot")
 
 if [[ "$old_imei" == "$new_imei" ]]; then
 	echo
@@ -108,8 +131,10 @@ else
 	mkdir -p /tmp/modem.1-1.2
 	echo "$new_imei" > /tmp/modem.1-1.2/modem-imei
 	# prevent imei leak via the LPA
-        echo "$new_imei" > /root/esim/imei
-        shred -u /root/esim/log.txt # unclear if the imei/imsi will be loged here, just a precaution
+	if [ -d /root/esim ]; then
+		echo "$new_imei" > /root/esim/imei
+		[ -f /root/esim/log.txt ] && shred -u /root/esim/log.txt
+	fi
 fi
 
 echo "You should now reset the modem or shutdown the device."
@@ -127,12 +152,14 @@ if [[ "$answer" -eq 1 ]]; then
     echo '{ "poweroff": "1" }' > /dev/ttyS0
 else
 	echo "Resetting modem..."
-	until gl_modem AT AT+QPOWD | grep -q OK
+	# CFUN=1,1 issues a soft modem reset; AT+QPOWD is Quectel-only and
+	# is not always available on the X72 firmware build.
+	until gl_modem AT 'AT+CFUN=1,1' | grep -q OK
 	do
 		echo "Resetting modem failed. Trying again."
 		sleep 1
-	done 
-	
+	done
+
 	time_start=$(date +%s)
 	until imsi=$(gl_modem AT AT+CIMI | grep -w -E "[0-9]{6,15}")
 	do
@@ -143,4 +170,3 @@ else
 	echo
 	echo "FIN"
 fi
-	

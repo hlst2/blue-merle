@@ -22,31 +22,20 @@ fi
 
 echo "$now" > /tmp/sim_change_start
 
-mcu_send_message "Starting SIM    swap."
+# Toggle flow always operates on the currently active SIM slot.
+slot=$(READ_SIM_SLOT)
+echo "$slot" > /tmp/blue-merle-slot
+
+mcu_send_message "Starting SIM    swap. (slot $slot)"
 sleep 3
-
-
-## We're disabling this abort functionality for the moment because the switch keeps being blocked and we cannot notice the pulled switch. We could abort by default and require another toggle to continue.
-#i=5
-#until  [[ $i -lt 0 ]]
-#do
-#	mcu_send_message "Pull switch to  abort ($i).     "
-#	i=$((i-1))
-#	sleep 1
-#
-#	CHECK_ABORT
-#done
-#
-#mcu_send_message "Continuing ..."
-#sleep 1
 
 mcu_send_message "Disabling the ME from transmitting and receiving RF signals."
 sleep 3
 
-old_imei=$(READ_IMEI)
-old_imsi=$(READ_IMSI)
-
-#CHECK_ABORT
+old_imei=$(READ_IMEI "$slot")
+old_imsi=$(READ_IMSI "$slot")
+echo "$old_imei" > /tmp/blue-merle-old-imei
+echo "$old_imsi" > /tmp/blue-merle-old-imsi
 
 answer=1
 while [[ "$answer" -eq 1 ]]; do
@@ -64,10 +53,10 @@ done
 ## We generate a random IMEI to prevent a leak of the
 ## new SIM's IMSI under the old IMEI in case the modem
 ## still talks to the network
-timeout 15  python3 /lib/blue-merle/imei_generate.py -r
+timeout 15 python3 /lib/blue-merle/imei_generate.py -r --slot "$slot"
 
 
-mcu_send_message "Replace the SIM card. Then pull the switch."
+mcu_send_message "Replace the SIM in slot $slot. Then pull the switch."
 
 echo done > /tmp/blue-merle-stage1
-logger -p notice -t blue-merle-toggle "Finished with Stage 1"
+logger -p notice -t blue-merle-toggle "Finished with Stage 1 (slot $slot)"

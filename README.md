@@ -1,99 +1,114 @@
-# blue-merle
+# blue-merle — Mudi 7 (GL-E5800) port
 
-The *blue-merle* software package enhances anonymity and reduces forensic traceability of the **GL-E750 / Mudi 4G mobile wi-fi router ("Mudi router")**. The portable device is explicitly marketed to privacy-interested retail users.
+> [!IMPORTANT]
+> **This branch (`mudi7-gl-e5800`) is a work-in-progress port** of blue-merle from the original GL-E750 (Mudi 4G, MIPS) hardware to the **GL.iNet Mudi 7 (GL-E5800)** 5G router.
+>
+> - For the stable GL-E750 release see [`main`](https://github.com/srlabs/blue-merle/tree/main) or the [v2.0 tag](https://github.com/srlabs/blue-merle/tree/v2.0).
+> - There are **no prebuilt `.ipk` releases** for this branch yet. Build from source ([see below](#building)) or grab the artifact from the GitHub Actions run for this branch.
+> - The IMEI write path (`AT+EGMR=1,7,"<imei>"`) has been confirmed working through the GL.iNet web UI on the Mudi 7 — full end-to-end CLI / toggle / web flows still need on-device verification. Issues and PRs welcome.
 
-*blue-merle* addresses the traceability drawbacks of the Mudi router by adding the following features to the Mudi router:
+The *blue-merle* software package enhances anonymity and reduces forensic traceability of the **GL.iNet Mudi 7 (GL-E5800) 5G mobile router**. The portable device is explicitly marketed to privacy-interested retail users.
 
-1.  Mobile Equipment Identity (IMEI) changer
-2.  Media Access Control (MAC) address log wiper
-3.  Basic Service Set Identifier (BSSID) randomization
-4.  MAC Address randomization
+*blue-merle* addresses the traceability drawbacks of the Mudi router by adding the following features:
+
+1. Mobile Equipment Identity (IMEI) changer (per SIM slot)
+2. Media Access Control (MAC) address log wiper
+3. Basic Service Set Identifier (BSSID) randomization
+4. MAC Address randomization
 
 ## Compatibility
 
-**This README covers the v2.0 release**, which has been verified to work with GL-E750 Mudi version 4.3.8 - 4.3.12 .
-Refer back to the [v1.0 README file](https://github.com/srlabs/blue-merle/tree/cb4d73731fe432e0f101284307101c250ca4b845) for information about the first release, which works on older firmware releases.
+**This branch targets v3.0**, which is for the **GL.iNet Mudi 7 (GL-E5800)** only:
 
-A MCU version >= 1.0.7 is required. The MCU may be updated through the *blue-merle* package installer or [manually](https://github.com/gl-inet/GL-E750-MCU-instruction). SRLabs cannot guarantee that the project assets within this Git repository will be compatible with future firmware updates.
+| Component | Specification |
+| --- | --- |
+| SoC      | Qualcomm quad-core 2.2 GHz (aarch64) |
+| 5G modem | Qualcomm Snapdragon X72 (Dragonwing MBB Gen 3) |
+| SIM      | Dual nano-SIM |
+| Firmware | gl-sdk4 based (GL.iNet 4.7.x or newer) |
+
+For the legacy GL-E750 (Mudi 4G, MIPS) refer back to the [v2.0 README](https://github.com/srlabs/blue-merle/tree/v2.0) and the v2.x release packages.
+
+> [!NOTE]
+> SRLabs cannot guarantee that the project assets within this Git repository will be compatible with future firmware updates.
+
+## How it talks to the modem
+
+The X72 modem is attached over MHI/PCIe rather than the legacy USB serial bus. There is **no `/dev/ttyUSB3`** — instead, blue-merle 3.x routes every modem command through GL.iNet's `gl_modem` helper that ships with gl-sdk4. This also lets us address either SIM slot independently using `gl_modem -s {1,2} AT ...`.
+
+The IMEI write command itself remains the Quectel-style `AT+EGMR=1,7,"<imei>"`, which the Mudi 7's modem firmware accepts (verified through the GL.iNet web UI). It can be overridden via `imei_generate.py --at-write '...'` should a future firmware require a different command.
 
 ## Installation
 
-### Online install & upgrade
+### Build & install from this branch
 
-The online install method requires an **active Internet connection** on your Mudi device to **download up-to-date dependencies**.
+There are no prebuilt v3.x packages yet. To install on a Mudi 7:
 
-Download the [prebuilt v2.0 release package](https://github.com/srlabs/blue-merle/releases/download/v2.0/blue-merle_2.0.0-0_mips_24kc.ipk) and copy it onto your Mudi (e.g. via `scp`), preferably into the `/tmp` folder. Then install the package file:
+1. **Build the `.ipk`** — push to a GitHub fork of this repo and let the [CI workflow](.github/workflows/ci.yml) produce an artifact, or build locally with the OpenWrt SDK as described under [Building](#building).
+2. **Copy to the device:**
+
+   ```sh
+   scp -O blue-merle_3.0.0-*_aarch64_cortex-a53.ipk root@192.168.8.1:/tmp/
+   ```
+
+3. **Install over SSH:**
+
+   ```sh
+   ssh root@192.168.8.1
+   opkg update
+   opkg install /tmp/blue-merle_3.0.0-*_aarch64_cortex-a53.ipk
+   ```
+
+To re-install after a rebuild:
 
 ```sh
-opkg update
-opkg install blue-merle*.ipk
+opkg install --force-reinstall /tmp/blue-merle_3.0.0-*.ipk
 ```
-To uprade blue-merle, download the newest blue-merle*.ipk, copy it to your Mudi and reinstall with:
-```sh
-opkg install --force-reinstall blue-merle*.ipk
-```
-
-### Offline install
-
-The offline install method does **not need an active Internet connection** on your Mudi device.
-
-Download the [prebuilt v2.0 offline release package](https://github.com/srlabs/blue-merle/releases/download/v2.0/blue-merle_2.0.0-0_offline_install.zip), then execute the following commands:
-
-```sh
-## Execute the following commands on the computer connected to the Mudi via WiFi / LAN
-
-unzip /path/to/downloaded.zip
-
-# Copy the offline release package to your Mudi
-# -O might be needed due to SSH daemon used by Mudi
-scp -O -r blue_merle_install root@192.168.8.1:/tmp
-
-# Connect to Mudi via SSH
-ssh root@192.168.8.1
-
-## Execute the following commands inside the SSH tunnel
-# Install dependencies and blue-merle
-cd /tmp/blue_merle_install
-./install.sh
-```
-
-**Note**: The offline install package bundles dependencies collected in October 2023. These dependencies could be outdated at the time of installation and might not be compatible with future Mudi firmware versions.
 
 ## Usage
 
 You may initiate an IMEI update in three different ways:
 
-1. **CLI**: via SSH on the command line,
-2. **Toggle**: using the Mudi's physical toggle switch, or
-3. **Web**: via the LuCI web interface.
+1. **CLI** — via SSH on the command line
+2. **Toggle** — using the Mudi's physical toggle switch
+3. **Web** — via the LuCI web interface
 
-You can set a deterministic or randomized IMEI on the command line. *Blue-merle*'s web and toggle interfaces always set a randomized IMEI.
+You can set a deterministic, randomized, or static IMEI on the command line. The web and toggle interfaces always set a randomized IMEI.
 
 ### CLI
 
-Connect to the device via SSH, then execute the `blue-merle` command. The command guides you through the process of **changing your SIM card**. We advise you to **reboot the device** after changing the IMEI.
+Connect to the device via SSH, then run `blue-merle`. The command:
+
+1. Prompts you to choose **which SIM slot** (1, 2, or current) to operate on.
+2. Reads the current IMEI/IMSI for that slot.
+3. Disables the modem RF, sets a random "interim" IMEI, and asks you to swap the SIM card.
+4. After the swap, asks whether to set a **random (`r`)** or **deterministic (`d`)** IMEI.
+5. Offers to **reset the modem** or **shut down** the device.
+
+We advise rebooting the device after changing the IMEI.
 
 ### Toggle
 
-This is a two-stage process.
+This is a two-stage process operating on the **currently active SIM slot**.
 
-Flip the Mudi's hardware switch to initiate the first stage of changing your device's IMEI. Follow the instructions on the display, which will ask you to **replace the SIM card** at the end.
+Flip the Mudi's hardware switch to initiate the first stage. Follow the instructions on the MCU display, which will ask you to **replace the SIM card in the active slot**.
 
 After replacing the SIM card, flip the switch again. The second stage **changes the IMEI** and then **powers off** the device. You should **change location** before booting again.
 
-**Note**: Occasionally, commands may take longer than expected to execute on the device. This can result in the display switching off (standby) for a few seconds before displaying the expected final message (e.g. instructions to replace the SIM card). Wait for the final message to appear before pulling the switch again. If no message is displayed after a minute, the script might have exited or you might have missed the message. In this case, pull the switch to continue / restart the process.
+> [!NOTE]
+> Occasionally, commands may take longer than expected to execute. If the display goes blank for a few seconds, wait for the final message before pulling the switch again.
 
 ### Web
 
-Open LuCI from `System` > `Advanced Settings` in Mudi's web interface. Find the `Blue Merle` settings under the `Network` tab. The web interface displays the current IMEI and IMSI and provides a button (`"SIM Swap..."`) to set a new randomized IMEI.
+Open LuCI from `System` > `Advanced Settings` in the Mudi web interface. Find `Blue Merle` under the `Network` tab. The web UI now displays the IMEI and IMSI for **both SIM slots** and provides a per-slot `SIM swap…` button.
 
-**Shutdown the device** once the process is complete. Then **swap your SIM card** and **change location** before booting again.
+**Shut down the device** once the process is complete. Then **swap your SIM card** and **change location** before booting again.
 
 ## Building
 
-This repository contains a CI script to auto-build the project using GitHub actions. Simply fork the repository or replicate the workflow on your local machine to build packages.
+This repository contains a CI workflow (GitHub Actions) that auto-builds the package against an `aarch64_cortex-a53` OpenWrt SDK. Fork the repo or replicate the workflow locally.
 
-You can also setup a full OpenWRT development environment and build the *blue-merle* package using:
+You can also set up a full OpenWrt build environment:
 
 ```sh
 git clone https://github.com/openwrt/openwrt
@@ -102,54 +117,49 @@ git clone https://github.com/srlabs/blue-merle package/blue-merle
 ./scripts/feeds update -a && ./scripts/feeds install -a
 make distclean && make clean
 make menuconfig
-	# Target System: Atheros ATH79
-	# Subtarget Generic Device with NAND flash
-	# Target Profile: GL.iNet GL-E750
-	# In Utilities, select <M> for blue-merle package
-	# Save new configuration
+    # Target System: any aarch64 target (e.g. Qualcomm Atheros 802.11ax / qualcommax)
+    # Target Profile: generic
+    # In Utilities, select <M> for blue-merle
+    # Save new configuration
 make
 make package/blue-merle/compile
 ```
 
-You will find the package in `./bin/packages/mips_24kc/base/`
+The package ships only shell scripts, Python, and static web assets — there is no native code, so any aarch64 SDK produces an `.ipk` that opkg will install on the Mudi 7.
+
+You will find the package in `./bin/packages/aarch64_cortex-a53/base/`.
 
 ## Implementation details
 
 ### IMEI randomization
 
-The Mudi router's baseband unit is a Quectel EP06-E/A Series LTE Cat 6 Mini PCIe [module](https://www.quectel.com/wp-content/uploads/pdfupload/Quectel_EP06_Series_LTE-A_Specification_V1.7.pdf).
+The Mudi 7's baseband is a Qualcomm Snapdragon X72 (Dragonwing MBB Gen 3). Its modem firmware accepts the Quectel-style `AT+EGMR=1,7,"<imei>"` write command, which we use to apply a new IMEI.
 
-The Mudi router's IMEI can be changed by issuing Quectel LTE series-standard AT commands. The AT command to write a new IMEI to a Quectel EP06-E/A-based device is `AT+EGMR`.
+`imei_generate.py` implements three approaches:
 
-Our IMEI randomization functionality is built around this command and implements two approaches to IMEI generation. The deterministic IMEI generation method generates a pseudo-random IMEI based on the inserted SIM's IMSI. This method will generate the same IMEI for the same IMSI, regardless of which particular *blue-merle*-enabled Mudi device is used. The second approach generates a random IMEI.
+- **Random** — a fresh random IMEI on each invocation.
+- **Deterministic** — the RNG is seeded from the IMSI, so the same SIM always produces the same IMEI regardless of which Mudi 7 is used.
+- **Static** — a user-supplied IMEI, validated against the Luhn checksum.
 
-SRLabs researchers verified that the Mudi router's IMEI can be changed persistently by connecting the device to a custom telco base station set-up. The changed IMEI is recorded within the new base station database entry, confirming that the IMEI change is observed both on the device- and ISP-level.
+To prevent leakage of the old IMEI under the new IMSI (or vice-versa), the modem RF is disabled (`AT+CFUN=4`) and an interim random IMEI is written **before** the user is asked to swap the SIM card.
 
-Furthermore, to ensure that there is no leakage of the old IMEI after changing the SIM card and setting a new IMEI, the Mudi router's radio is turned off in advance and an interim randomized IMEI is set. Both the command-line and hardware switch version of *blue-merle* will guide you through the IMEI update process in order to minimize the risk of IMEI leaks.
+### Dual-SIM handling
 
-Running *blue-merle* will disrupt the device's connection with the ISP during the time the IMEI is changed, and by default the connection is only reestablished once the device is rebooted.
+The Mudi 7 exposes both nano-SIM slots through a single modem. We address slots via `gl_modem -s {1,2} AT ...` and use `AT+QUIMSLOT?` / `AT+QUIMSLOT=N` (with a UCI fallback) to query/switch the active slot. Each slot has its own IMSI and you can write a different IMEI per slot if your operational model calls for it.
 
-This process can be observed in Figure 1, where there is a large break in connectivity between entries 70 and 80. This break is the result of turning the radio off.
+### BSSID randomization
 
-![Figure 1. The router's radio is turned off and the IMEI is randomized between entries 70 and 80. The ISP cannot connect to it.](./IMEI%20randomization.png)
+The Mudi router BSSID is set by hostapd via `mac80211_prepare_vif()` in `/rom/lib/netifd/wireless/mac80211.sh` and persisted in `/etc/config/wireless`.
 
-[Figure 1](./IMEI%20randomization.png) The router's radio is turned off and the IMEI is randomized between entries 70 and 80. The ISP cannot connect to it.
-
-### Basic Service Set Identifier (BSSID) randomization
-
-The Mudi router BSSID is set by the hostapd process using the `mac80211_prepare_vif()` function in `/rom/lib/netifd/wireless/mac80211.sh`. The resulting BSSID is stored in `/etc/config/wireless`.
-
-The implemented BSSID randomization function generates a valid unicast address value and overrides the current MAC values set within the `wlan0` and `wlan1` interfaces. This is done by issuing OpenWrt uci set commands targeting the macaddr fields of `wireless.@wifi-iface[0]` and `wireless.@wifi-iface[1]`. The Mudi router's wifi is then reset to implement the changes.
-
-The BSSID randomization feature is run on boot, ensuring that a new BSSID is generated each time the device is started.
+`blue-merle`'s init script generates a valid unicast address and overrides the `macaddr` fields of `wireless.@wifi-iface[0]` (2.4 GHz) and `wireless.@wifi-iface[1]` (5 GHz) on each boot, ensuring a fresh BSSID every cold start.
 
 ### MAC address log wiping
 
-Connecting devices' MAC addresses are stored persistently within the Mudi router at `/etc/oui-tertf`. On boot, *blue-merle* deletes (using `shred`) the client database, then mounts a `tmpfs` filesystem at this location and restarts the services that manage the client database. This ensures the client database is only retained in RAM and not on disk while retaining the web UI functionality.
+Connecting devices' MAC addresses are stored persistently within the Mudi at `/etc/oui-tertf`. On boot, *blue-merle* deletes the client database (using `shred`), mounts a `tmpfs` at this location, and restarts the services that manage the database. The DB is retained in RAM only — UI functionality is preserved, on-disk traces are not.
 
-### MAC Address Randomization
+### MAC address randomization
 
-*Blue-merle* sets a randomized MAC address for the WAN interface. If you use the device in repeater mode to connect to another WiFI AP, the Mudi's MAC address will change after every boot. This might interfere with MAC filtering if enabled on the upstream WiFi AP.
+*Blue-merle* sets a randomized MAC address for the WAN interface. In repeater mode the Mudi's upstream-facing MAC will change after every boot. This may interfere with MAC filtering on the upstream AP.
 
 ## Acknowledgement: blue merle
 

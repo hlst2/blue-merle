@@ -5,7 +5,11 @@
 
 rm -f /tmp/blue-merle-stage1
 
-mcu_send_message "Switch pulled.  Continuing..."
+slot=$(cat /tmp/blue-merle-slot 2>/dev/null)
+[ -z "$slot" ] && slot=$(READ_SIM_SLOT)
+old_imsi=$(cat /tmp/blue-merle-old-imsi 2>/dev/null)
+
+mcu_send_message "Switch pulled.  Continuing... (slot $slot)"
 sleep 1
 sim_switch on
 
@@ -31,35 +35,40 @@ fi
 
 sleep 1
 
-new_imsi=$(READ_IMSI)
+new_imsi=$(READ_IMSI "$slot")
 
 if [[ "$old_imsi" == "$new_imsi" ]]; then
 	mcu_send_message "WARNING:        Old IMSI equals new IMSI. Did you swap the SIM?"
 	sleep 3
 fi
-old_imei=$(READ_IMEI)
+old_imei=$(READ_IMEI "$slot")
 mcu_send_message "Setting random   IMEI"
-timeout 15 python3 /lib/blue-merle/imei_generate.py -r
+timeout 15 python3 /lib/blue-merle/imei_generate.py -r --slot "$slot"
 
-new_imei=$(READ_IMEI)
+new_imei=$(READ_IMEI "$slot")
 
 
 if [[ "$old_imei" == "$new_imei" ]]; then
 	mcu_send_message "WARNING:        Old IMEI equals new IMEI."
 	sleep 3
 else
-	#FIXME old_imei is not the real old imei because in stage1 its already generated a new one
-	# so this is a bit missleading but for the prupose of visualy see the change it works
+	# old_imei here is the interim random IMEI written in stage 1, not
+	# the truly-old one — but it works for the visual confirmation on
+	# the MCU display.
 	mcu_send_message  "IMEI Old:...... ${old_imei}IMEI New:...... ${new_imei}"
 	sleep 5
 	mkdir -p /tmp/modem.1-1.2
 	echo "$new_imei" > /tmp/modem.1-1.2/modem-imei
 	# prevent imei leak via the LPA
-	echo "$new_imei" > /root/esim/imei
-	shred -u /root/esim/log.txt # unclear if the imei/imsi will be loged here, just a precaution
+	if [ -d /root/esim ]; then
+		echo "$new_imei" > /root/esim/imei
+		[ -f /root/esim/log.txt ] && shred -u /root/esim/log.txt
+	fi
 fi
 
-logger -p notice -t blue-merle-toggle "Changed IMEI from ${old_imei} to ${new_imei}"
+logger -p notice -t blue-merle-toggle "Changed IMEI from ${old_imei} to ${new_imei} (slot $slot)"
+
+rm -f /tmp/blue-merle-slot /tmp/blue-merle-old-imei /tmp/blue-merle-old-imsi
 
 
 mcu_send_message "The device will shutdown now."
