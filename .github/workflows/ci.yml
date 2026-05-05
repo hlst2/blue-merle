@@ -22,8 +22,8 @@ jobs:
       # Qualcomm aarch64 SoC. The package contains only shell + Python +
       # static resources (no native compilation), so any aarch64 SDK builds
       # an installable .ipk.
-      SDK_URL: "https://downloads.openwrt.org/releases/23.05.0/targets/qualcommax/ipq807x/openwrt-sdk-23.05.0-qualcommax-ipq807x_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
-      SDK_FILENAME: "openwrt-sdk-23.05.0-qualcommax-ipq807x_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+      SDK_URL: "https://downloads.openwrt.org/releases/23.05.0/targets/ipq807x/generic/openwrt-sdk-23.05.0-ipq807x-generic_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+      SDK_FILENAME: "openwrt-sdk-23.05.0-ipq807x-generic_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
       PKG_ARCH: "aarch64_cortex-a53"
     steps:
       - uses: actions/checkout@v3
